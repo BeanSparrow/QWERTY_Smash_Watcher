@@ -1,0 +1,25 @@
+KOs
+Falls
+SDs
+Damage Given|%
+Damage Taken|%
+Damage Recovered|%
+Peak Damage|%
+Launch Distance|m
+Ground Time|s
+Air Time|s
+Swim Time|s
+Hit Percentage|%
+Ground Attacks
+Air Attacks
+Smash Attacks
+Throws
+Edge Grabs
+Projectiles
+Items Grabbed
+Max Launch Speed|km/h
+Max Launcher Speed|km/h
+Longest Drought|s
+Transformation Time|s
+Final Smashes
+Team Attacks
