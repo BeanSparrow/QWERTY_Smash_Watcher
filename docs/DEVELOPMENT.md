@@ -43,7 +43,21 @@ powershell -ExecutionPolicy Bypass -File tools/make_fake_stats_screen.ps1 -Out l
 powershell -ExecutionPolicy Bypass -File tools/test_reader.ps1 -Image local/fake_0.png
 ```
 
-`test_reader.ps1` also takes real screenshots or `local\samples\*.png` from Ken, and several images separated by commas (combined like one recording). Add `-Dump` to see every word the OCR read with its position.
+`test_reader.ps1` also takes real screenshots or `local\samples\*.png` from Ken, and several images separated by commas (combined like one recording). Add `-Dump` to see every word the OCR read with its position. In its output, `?` marks cells the review window shows in yellow.
+
+Real captures from Ken live in `local\samples\ken\` (not in git). Screenshots pasted in chat arrive as WebP; convert them with:
+
+```bash
+powershell -ExecutionPolicy Bypass -File tools/convert_image.ps1 -In shot.webp -Out local/samples/ken/shot.png
+```
+
+### What the real stats screen looks like (from Ken's samples)
+
+- One panel per player, edge to edge with 4 players and with a gap with 2. Labels sit on dark bars, and each **value is on the line below its label**, right-aligned.
+- KOs and Falls are stock icons on this screen, not numbers.
+- Above the list: the character name (large, may wrap to two lines), "P1" plus the player tag ("Player 4"), and a big placement digit, which the OCR doesn't read.
+- Each panel ends in an "(A) OK" button. Replays add "Next Replay", a countdown and "(B) Quit" down the middle.
+- The game's lone `0` rarely reads. The reader takes a second look at visible but empty value lines (enlarged crop), then assumes 0. Both results are shown yellow in the review.
 
 ## Releasing an update to Ken
 

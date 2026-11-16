@@ -1,5 +1,6 @@
 # Draws a stand-in for the SSBU stats screen (3 player panels, darkened like a replay) so the reader can be
-# tested without the game. The real layout differs in details; always confirm with a real screenshot.
+# tested without the game: label bars with the value on the line below, right-aligned, as on the real screen.
+# Real captures are the better test (local\samples\ken); this is a quick regression check.
 #   powershell -ExecutionPolicy Bypass -File tools\make_fake_stats_screen.ps1 -Out local\fake_stats.png [-FirstRow 0] [-Dim 0.55]
 param(
     [string]$Out = 'local\fake_stats.png',
@@ -20,10 +21,11 @@ $players = @(
 )
 $rand = New-Object System.Random 7
 function Fake-Value($label, $p) {
-    if ($label -match 'Damage|Hit Percentage') { return ('{0:N1}%' -f ($rand.Next(50, 999) / 10.0)) }
-    if ($label -match 'Distance') { return ('{0:N1} m' -f ($rand.Next(100, 9000) / 10.0)) }
-    if ($label -match 'Time|Drought') { return ('{0:N1} s' -f ($rand.Next(10, 2000) / 10.0)) }
-    if ($label -match 'Speed') { return ('{0:N1} km/h' -f ($rand.Next(100, 4000) / 10.0)) }
+    # Whole numbers with the game's units, as on the real screen.
+    if ($label -match 'Damage|Hit Percentage') { return ('{0}%' -f $rand.Next(0, 450)) }
+    if ($label -match 'Distance') { return ('{0} m' -f $rand.Next(50, 900)) }
+    if ($label -match 'Time|Drought') { return ('{0} sec.' -f $rand.Next(0, 200)) }
+    if ($label -match 'Speed') { return ('{0} km/h' -f $rand.Next(100, 1200)) }
     return [string]$rand.Next(0, 40)
 }
 
@@ -32,6 +34,7 @@ $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.TextRenderingHint = 'AntiAliasGridFit'
 $g.Clear([System.Drawing.Color]::FromArgb(30, 30, 40))
 $fLabel = New-Object System.Drawing.Font('Arial', 20, [System.Drawing.FontStyle]::Bold)
+$fValue = New-Object System.Drawing.Font('Arial Black', 26)
 $fName = New-Object System.Drawing.Font('Arial Black', 34)
 $fPlace = New-Object System.Drawing.Font('Arial Black', 72)
 $fSmall = New-Object System.Drawing.Font('Arial', 20, [System.Drawing.FontStyle]::Bold)
@@ -50,11 +53,13 @@ for ($p = 0; $p -lt 3; $p++) {
     $y = 240
     for ($i = $FirstRow; $i -lt [Math]::Min($labels.Count, $FirstRow + 8); $i++) {
         $v = Fake-Value $labels[$i] $p
+        # Like the real screen: label bar, then the value on the line below, right-aligned.
+        $g.FillRectangle((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(120, 0, 0, 0))), $x + 14, $y - 4, $panelW - 28, 38)
         $g.DrawString($labels[$i], $fLabel, $white, $x + 24, $y)
-        $sz = $g.MeasureString($v, $fLabel)
-        $g.DrawString($v, $fLabel, $white, $x + $panelW - 30 - $sz.Width, $y)
+        $sz = $g.MeasureString($v, $fValue)
+        $g.DrawString($v, $fValue, $white, $x + $panelW - 30 - $sz.Width, $y + 38)
         $expected += ('P{0} {1} = {2}' -f ($p + 1), $labels[$i], $v)
-        $y += 82
+        $y += 92
     }
 }
 # Replay overlay text in the middle, like the real replay screen.

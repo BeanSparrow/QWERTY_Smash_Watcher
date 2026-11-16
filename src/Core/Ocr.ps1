@@ -62,6 +62,28 @@ function Read-Ocr($bmp) {
     return $lines
 }
 
+# Second look at one small area (a value line the full-frame pass missed). The OCR reads short isolated text
+# much better when it's enlarged and given a margin. Returns the text left to right, or ''.
+function Read-OcrArea($frame, [System.Drawing.Rectangle]$rect) {
+    $rect = [System.Drawing.Rectangle]::Intersect($rect, (New-Object System.Drawing.Rectangle 0, 0, $frame.Width, $frame.Height))
+    if ($rect.Width -lt 8 -or $rect.Height -lt 8) { return '' }
+    $crop = $frame.Clone($rect, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $scale = [Math]::Max(1.0, [Math]::Min(4.0, 150.0 / $rect.Height))
+    $w = [int]($rect.Width * $scale); $h = [int]($rect.Height * $scale); $pad = [int](0.4 * $h)
+    $canvas = New-Object System.Drawing.Bitmap ($w + 2 * $pad), ($h + 2 * $pad)
+    $g = [System.Drawing.Graphics]::FromImage($canvas)
+    try {
+        $g.Clear([System.Drawing.Color]::Black)
+        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $g.DrawImage($crop, (New-Object System.Drawing.Rectangle $pad, $pad, $w, $h))
+    } finally { $g.Dispose(); $crop.Dispose() }
+    $enh = [SmashWatcher.Native]::Enhance($canvas, 1.0, $true)
+    $canvas.Dispose()
+    try { $lines = @(Read-Ocr $enh) } finally { $enh.Dispose() }
+    $ws = @(); foreach ($l in $lines) { $ws += $l.Words }
+    return ((@($ws | Sort-Object X | ForEach-Object { $_.T })) -join '')
+}
+
 function Format-OcrDump($lines) {
     $sb = New-Object System.Text.StringBuilder
     foreach ($l in $lines) {

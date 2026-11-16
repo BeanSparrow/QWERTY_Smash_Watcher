@@ -23,7 +23,7 @@ function New-Recording([string[]]$allLabels, [string[]]$wanted) {
 }
 
 function Add-RecordingFrame($rec, $ocr, $frame, [double]$ocrWidth) {
-    $m = Read-StatsFrame $ocr $rec.AllLabels $ocrWidth
+    $m = Read-StatsFrame $ocr $rec.AllLabels $ocrWidth $frame
     if ($m -eq $null) { return 0 }
     [void]$rec.Frames.Add($m)
     if ($m.Cells.Count -gt $rec.ThumbScore) {
@@ -55,19 +55,29 @@ function Build-MatchTable($rec, $statList) {
     foreach ($f in $rec.Frames) { $nVotes[$f.N] = [int]$nVotes[$f.N] + $f.Cells.Count + 1 }
     $n = [int](Get-TopVote $nVotes)
 
-    $votes = @{}
+    # Three tiers, each voted on separately: full-frame readings, second-look readings (enlarged crop), and guessed
+    # zeros (value line visible but unreadable). A lower tier is only used when no frame produced a higher one.
+    $votes = @{}; $recheckVotes = @{}; $guessVotes = @{}
     foreach ($f in $rec.Frames) {
         if ($f.N -ne $n) { continue }
-        foreach ($src in @($f.Cells, $f.Head)) {
+        foreach ($pair in @(@($f.Cells, $votes), @($f.Head, $votes), @($f.Rechecks, $recheckVotes), @($f.Guesses, $guessVotes))) {
+            $src = $pair[0]; $tally = $pair[1]
+            if ($src -eq $null) { continue }
             foreach ($k in @($src.Keys)) {
                 $v = [string]$src[$k]
                 if (-not $v) { continue }
-                if (-not $votes.ContainsKey($k)) { $votes[$k] = @{} }
-                $votes[$k][$v] = [int]$votes[$k][$v] + 1
+                if (-not $tally.ContainsKey($k)) { $tally[$k] = @{} }
+                $tally[$k][$v] = [int]$tally[$k][$v] + 1
             }
         }
     }
-    $get = { param($k) Get-TopVote $votes[$k] }
+    $realKeys = $votes
+    $get = {
+        param($k)
+        if ($votes.ContainsKey($k)) { return Get-TopVote $votes[$k] }
+        if ($recheckVotes.ContainsKey($k)) { return Get-TopVote $recheckVotes[$k] }
+        return Get-TopVote $guessVotes[$k]
+    }
 
     # Survival time: seconds until knocked out. A player never knocked out ("---") gets the longest time anyone was out.
     $secs = @(); $maxOut = $null
@@ -114,10 +124,16 @@ function Build-MatchTable($rec, $statList) {
     $found = 0
     foreach ($stat in $statList) {
         if ($rec.Wanted -notcontains $stat.Name) { continue }
-        $vals = @(); $any = $false
-        for ($c = 0; $c -lt $n; $c++) { $v = & $get ("$c|" + $stat.Name); if ($v) { $any = $true }; $vals += $v }
+        $vals = @(); $guessed = @(); $any = $false
+        for ($c = 0; $c -lt $n; $c++) {
+            $k = "$c|" + $stat.Name
+            $v = & $get $k
+            if ($v) { $any = $true }
+            $vals += $v
+            $guessed += ([bool]$v -and -not $realKeys.ContainsKey($k))
+        }
         if ($any) { $found++ }
-        $rows += [pscustomobject]@{ Key = ('stat:' + $stat.Name); Label = (Get-StatDisplayName $stat); Values = $vals }
+        $rows += [pscustomobject]@{ Key = ('stat:' + $stat.Name); Label = (Get-StatDisplayName $stat); Values = $vals; Guessed = $guessed }
     }
     return @{ N = $n; Stamp = $rec.Stamp; Rows = $rows; Found = $found; Wanted = $rec.Wanted.Count; Thumb = $rec.Thumb }
 }

@@ -36,4 +36,12 @@ foreach ($path in @($Image | ForEach-Object { $_.Split(',') } | Where-Object { $
 $table = Build-MatchTable $rec $stats
 if ($table.Error) { Write-Host $table.Error; exit 1 }
 Write-Host ('{0} player panel(s), {1} of {2} stats read.' -f $table.N, $table.Found, $table.Wanted)
-foreach ($row in $table.Rows) { Write-Host ('{0,-26} {1}' -f $row.Label, (($row.Values | ForEach-Object { '{0,-14}' -f $_ }) -join '')) }
+# "?" marks cells the review window shows in yellow (hard to read, or assumed 0).
+foreach ($row in $table.Rows) {
+    $cellsText = for ($i = 0; $i -lt $row.Values.Count; $i++) {
+        $v = [string]$row.Values[$i]
+        if ($row.PSObject.Properties['Guessed'] -and $row.Guessed[$i]) { $v += '?' }
+        '{0,-14}' -f $v
+    }
+    Write-Host ('{0,-26} {1}' -f $row.Label, ($cellsText -join ''))
+}

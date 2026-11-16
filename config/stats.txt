@@ -1,6 +1,6 @@
 KOs
 Falls
-SDs
+Self-Destructs
 Damage Given|%
 Damage Taken|%
 Damage Recovered|%
@@ -13,6 +13,7 @@ Hit Percentage|%
 Ground Attacks
 Air Attacks
 Smash Attacks
+Grabs
 Throws
 Edge Grabs
 Projectiles

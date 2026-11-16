@@ -20,7 +20,7 @@ It needs nothing but Windows 10 or 11: no Python, no installs.
 
 1. Press **Start**. The app checks the video once a second.
 2. When stat names (KOs, Falls, Damage Given...) show up, it records for 20 seconds. Scroll through the stats screen during that time so it sees every row.
-3. A **review window** opens with a column per player. Fix anything that's wrong (pink rows weren't read), then:
+3. A **review window** opens with a column per player. Fix anything that's wrong, then send it. **Pink** rows weren't read at all. **Yellow** cells were hard to read, or were assumed to be 0 because the value was on screen but unreadable (the game's lone "0" is hard for Windows to read), so check those. Your options:
    - **Send to Google Sheets**
    - **Copy** (paste into the sheet yourself)
    - **Save to CSV file only**

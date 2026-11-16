@@ -2,7 +2,7 @@
 
 function Show-ReviewWindow($match, $statList) {
     $n = $match.N
-    $script:RV = @{ Match = $match; Stats = $statList; Done = $false; RowOf = @{} }
+    $script:RV = @{ Match = $match; Stats = $statList; Done = $false; RowOf = @{}; Guesses = 0 }
 
     $rf = New-Object System.Windows.Forms.Form
     $rf.Text = 'Review match stats'; $rf.ClientSize = New-Object System.Drawing.Size(700, 560)
@@ -23,9 +23,15 @@ function Show-ReviewWindow($match, $statList) {
         $script:RV.RowOf[$row.Key] = $i
         $blank = (@($row.Values | Where-Object { $_ }).Count -eq 0)
         if ($blank) { $grid.Rows[$i].DefaultCellStyle.BackColor = [System.Drawing.Color]::MistyRose }
+        if ($row.PSObject.Properties['Guessed'] -and $row.Guessed) {
+            for ($c = 0; $c -lt $n; $c++) {
+                if ($row.Guessed[$c]) { $grid.Rows[$i].Cells[$c + 1].Style.BackColor = [System.Drawing.Color]::LightGoldenrodYellow; $script:RV.Guesses++ }
+            }
+        }
         if ($row.Key -like 'stat:*') { $statRows++; if ($blank) { $missing++ } }
     }
     $msg = ('{0} of {1} ticked stats read for {2} player(s), match at {3}. Columns are the player panels, left to right. Click any cell to fix it. Pink rows were not read.' -f ($statRows - $missing), $statRows, $n, $match.Stamp)
+    if ($script:RV.Guesses -gt 0) { $msg += ' Yellow cells were hard to read (or assumed 0), so check them.' }
     $lbl = New-Object System.Windows.Forms.Label
     $lbl.SetBounds(10, 6, 680, 48); $lbl.Text = $msg; $lbl.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
 
