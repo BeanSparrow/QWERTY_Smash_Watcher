@@ -4,7 +4,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $version = (Get-Content (Join-Path $root 'VERSION') -Raw).Trim()
-$include = @('SmashWatcher.ps1', 'Start Smash Watcher.bat', 'README.md', 'VERSION', 'src', 'config', 'google', 'launcher')
+$include = @('SmashWatcher.ps1', 'README.md', 'VERSION', 'src', 'config', 'google', 'launcher')
 
 foreach ($item in $include) {
     if (-not (Test-Path (Join-Path $root $item))) { throw "Missing $item" }

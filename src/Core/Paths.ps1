@@ -26,3 +26,14 @@ foreach ($name in @('settings.json', 'results_matches.csv')) {
     $new = Join-Path $LocalDir $name
     if ((Test-Path $old) -and -not (Test-Path $new)) { Move-Item $old $new }
 }
+
+# Updates add and replace files but don't delete ones that moved. Remove app files that now live elsewhere.
+$MovedFiles = @{
+    'Start Smash Watcher.bat' = 'launcher\Start Smash Watcher.bat'   # moved in 5.0.1
+}
+foreach ($old in $MovedFiles.Keys) {
+    $oldPath = Join-Path $AppRoot $old
+    if ((Test-Path $oldPath) -and (Test-Path (Join-Path $AppRoot $MovedFiles[$old]))) {
+        try { Remove-Item $oldPath -Force } catch { }
+    }
+}

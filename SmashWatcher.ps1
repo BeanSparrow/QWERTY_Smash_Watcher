@@ -1,7 +1,7 @@
 # Smash Watcher: reads the Super Smash Bros. Ultimate post-match stats screen and, after you approve them,
 # sends the stats to Google Sheets. Uses only what Windows already includes.
 #
-# Start it with "Start Smash Watcher.bat" or SmashWatcher.exe (built by launcher\make_exe.bat).
+# Start it with SmashWatcher.exe (built by launcher\make_exe.bat) or launcher\Start Smash Watcher.bat.
 
 $ErrorActionPreference = 'Stop'
 $AppRoot = Split-Path -Parent $MyInvocation.MyCommand.Path

@@ -7,9 +7,13 @@ It needs nothing but Windows 10 or 11: no Python, no installs.
 ## First-time setup
 
 1. **Unzip into a new folder.** If you had an older version, copy your old `settings.json` into this folder's `local` folder, or just paste your Google link again on the Setup tab.
-2. **Make the app icon (optional).** Double-click `launcher\make_exe.bat`. It builds `SmashWatcher.exe` in the main folder. Otherwise, start it with `Start Smash Watcher.bat`.
-3. **Show the game in a projector window.** In OBS or Streamlabs, right-click the game source (or the preview) and pick **Windowed Projector**. Make it at least about 1000 pixels wide. It can sit behind other windows, but it can't be minimized.
-4. **Pick it as the source.** On the **Run** tab, choose `Window: ... Projector ...` from the **Source** list. A preview shows what the app sees.
+2. **Make the app icon.** Double-click `launcher\make_exe.bat`. It builds `SmashWatcher.exe` in the main folder; start the app with that from now on. (`launcher\Start Smash Watcher.bat` also starts it, with a console window that shows any startup error.)
+3. **Show the game in a projector window.** Project just the game capture source, not the preview or the whole scene, so overlays, alerts or a facecam can't cover the stats:
+   - **Streamlabs:** right-click the game capture source > **Create Source Projector**.
+   - **OBS:** right-click the game capture source > **Open Source Projector > New window** (or **Windowed Projector (Source)**).
+
+   Make the window at least about 1000 pixels wide. It can sit behind other windows or on another monitor, but it can't be minimized.
+4. **Pick it as the source.** On the **Run** tab, choose the projector window from the **Source** list. A preview shows what the app sees. The app finds the window by its title, so if you rename the source in OBS or Streamlabs, press **Refresh** and pick it again.
 5. **Connect Google Sheets** (see below), or skip it and use **Copy** or **Save to CSV** in the review window.
 
 ## Every match

@@ -4,7 +4,6 @@
 
 ```
 SmashWatcher.ps1            Entry point. Loads src\ and opens the main window.
-Start Smash Watcher.bat     Starts the entry point with a console (handy for errors).
 VERSION                     App version; the updater compares it to the latest GitHub release tag.
 src\
   Bootstrap.ps1             Loads Native.cs and every Core module. Shared by the app and tools\.
@@ -25,7 +24,7 @@ src\
     RegionPicker.ps1        Snipping-Tool-style "Set region".
 config\stats.txt            Stat labels in on-screen order ("Label" or "Label|unit").
 google\apps_script.gs       Receiver pasted into the Google Sheet.
-launcher\                   SmashWatcher.exe source and build script.
+launcher\                   SmashWatcher.exe source, make_exe.bat, and "Start Smash Watcher.bat" (console start, for errors).
 tools\                      Developer scripts (not shipped).
 local\                      User data. Gitignored, never shipped, never touched by updates.
 ```
