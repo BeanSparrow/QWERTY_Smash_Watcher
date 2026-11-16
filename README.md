@@ -1,67 +1,66 @@
-# Smash Watcher v4 (no installs)
+# Smash Watcher
 
-Needs only Windows 10/11. It reads a video source (webcam, OBS Virtual Camera, capture card), waits for the end screen, reads the stats table, and shows it to you in a review window. **Nothing is sent anywhere until you click Send.**
+Watches your Super Smash Bros. Ultimate video. When the post-match stats screen comes up, it reads every player's stats, shows them to you in a review window, and, only after you approve them, adds them to a Google Sheet.
 
-## 1. Run
+It needs nothing but Windows 10 or 11: no Python, no installs.
 
-Double-click `run_watcher.bat`, or run `make_exe.bat` once to build `SmashWatcher.exe` (keep it in this folder).
+## First-time setup
 
-## 2. Pick the video source (Run tab)
+1. **Unzip into a new folder.** If you had an older version, copy your old `settings.json` into this folder's `local` folder, or just paste your Google link again on the Setup tab.
+2. **Make the app icon (optional).** Double-click `launcher\make_exe.bat`. It builds `SmashWatcher.exe` in the main folder. Otherwise, start it with `Start Smash Watcher.bat`.
+3. **Show the game in a projector window.** In OBS or Streamlabs, right-click the game source (or the preview) and pick **Windowed Projector**. Make it at least about 1000 pixels wide. It can sit behind other windows, but it can't be minimized.
+4. **Pick it as the source.** On the **Run** tab, choose `Window: ... Projector ...` from the **Source** list. A preview shows what the app sees.
+5. **Connect Google Sheets** (see below), or skip it and use **Copy** or **Save to CSV** in the review window.
 
-The dropdown lists your cameras, a **Screen region**, and your monitors, and shows one preview frame when you pick one. Nothing is captured or kept open until you press Start (or Test now / Save sample), and the source is released again when you stop.
-- **Camera** entries use Windows' camera API. Only one app can use a capture card or webcam at a time, and some virtual cameras (notably OBS Virtual Camera, which is DirectShow-only) can't be opened this way.
-- **Screen region** (works with anything): show your video on screen, for example in an OBS projector window (right-click the OBS preview > Windowed Projector or Fullscreen Projector). Press **Set region**, keep the mouse on that monitor, wait for the beep, and drag a box around just the video. The app then reads that box, and doesn't care where the video comes from.
-- If Windows blocks a camera: **Settings > Privacy > Camera > Let desktop apps access your camera**.
+## Every match
 
-## 3. Detection tab
+1. Press **Start**. The app checks the video once a second.
+2. When stat names (KOs, Falls, Damage Given...) show up, it records for 20 seconds. Scroll through the stats screen during that time so it sees every row.
+3. A **review window** opens with a column per player. Fix anything that's wrong (pink rows weren't read), then:
+   - **Send to Google Sheets**
+   - **Copy** (paste into the sheet yourself)
+   - **Save to CSV file only**
+   - **Discard**
+4. Pressing **Stop** during the recording ends it early and still opens the review window with what was read.
 
-Two triggers, either can fire it:
-- **Text:** words on the end/stats screen (one per line). Fires when N of them are on screen at once. The stat labels themselves (Damage Given, Falls...) work well here.
-- **Images:** snip any number of reference images from the live video. Any one matching fires it.
-- **Test now** reports what the current frame matches and how the stats table reads (players found, names, placements, values). **Save sample** writes the frame and an OCR dump to `samples\`.
+## Tabs
 
-## 4. Stats tab
+- **Run:** Start, Stop, source, preview, and the log.
+- **Detection:** what starts a recording (stat names on screen, plus optional extra words), how long to record, and the image boost. **Test now** reads the current frame and says what it found. **Save sample** saves the picture and the text it read to `local\samples`. Send those when something reads wrong.
+- **Stats:** tick the stats you want. Unticked stats stay blank, so sheet columns never move.
+- **Setup:** Google Sheets link, updates, and a button to open your data folder.
 
-Tick the stats to record. `stats.txt` lists them in on-screen order, top to bottom, one per line, with an optional unit after a `|` (for example `Damage Given|%`). The reader uses that order: if a label is misread or missed, its row is found by its position between the labels that were read.
+## How the stats are read
 
-Every stat always keeps its own column in the sheet. Unticked stats stay blank, so your columns never shift. If you add or remove lines in `stats.txt`, start a new sheet tab (or clear the header row), because the columns change.
+- Each player panel is a column, left to right.
+- **Character** is the big name at the top of each panel.
+- **Survival time** is the seconds until that player was knocked out. A player who was never knocked out gets the longest time anyone lasted, which is the match length.
+- **Placement** is read from the screen when possible. Otherwise it's worked out from survival time, with never knocked out counting as 1st.
+- Values are stored as plain numbers. The units are in the column headers.
 
-## 5. How a match is read
+## Google Sheets
 
-- Each **column on screen is a player**, left to right (P1, P2, ...).
-- From the top of each column it reads **name, placement (1st, 2nd...), and player number**, plus the time they were knocked out.
-- **Survival time** is the seconds until that player was out. A player showing `---` (never out) gets the longest time anyone was out, which is when the match ended. That way the stat is a number for everybody. Placement still tells you who won.
-- The KOs, Falls and SDs rows are read once from the number screen. The icon screen has no numbers, so it's ignored.
-- Values are stored as plain numbers without % or units (the units are in the column headers).
+1. Open your Google Sheet and click **Extensions > Apps Script**. It has to be opened from the sheet; a project made at script.google.com won't work.
+2. Delete everything in the editor and paste in all of `google\apps_script.gs`. The **Show the script to paste** button on the Setup tab opens it for you. Click save.
+3. Click **Deploy > New deployment**, click the gear, and choose **Web app**.
+4. Set **Execute as: Me** and **Who has access: Anyone**, then click **Deploy**.
+5. Click **Authorize access**, choose your account, then **Advanced > Go to (project) > Allow**.
+6. Copy the **Web app URL** (it ends in `/exec`) into the Setup tab and press **Test connection**. A `Smash Matches` tab with headers appears in your sheet.
 
-## 6. Review window
+If it fails, the log says what Google answered. Common fixes:
+- **Access isn't "Anyone":** redeploy with it set.
+- **Script edited after deploying:** go to **Deploy > Manage deployments > pencil > Version: New version > Deploy**.
+- **URL ends in `/dev`:** use the `/exec` one.
 
-When the recording ends, a window shows a grid like the game screen: rows are Name, Placement, Player number, Survival time, then each ticked stat, with a column per player, plus the frame it was read from. Click any cell to fix it. Rows that couldn't be read are pink. Then:
-- **Send to Google Sheets:** one sheet row per player. If it fails, the window stays open so nothing is lost.
-- **Copy:** copies the rows so you can paste them straight into the sheet (no Google setup needed).
-- **Save to CSV file only:** appends to `results_matches.csv`.
-- **Discard:** throws them away.
+## Updates
 
-## 7. Google Sheets (optional if you use Copy)
+**Setup > Check for updates.** The app also checks quietly when it starts. Updating keeps your settings, results and samples (everything in `local`), backs up the old version to `local\backup`, and restarts. If an update changes the Google script, the app tells you to paste it again.
 
-1. Open your Google Sheet. Click **Extensions > Apps Script**.
-2. Select everything in the editor, delete it, paste in all of `apps_script.gs`, and click save.
-3. Click **Deploy > New deployment**. Click the gear next to "Select type" and choose **Web app**.
-4. Set **Execute as: Me** and **Who has access: Anyone**. Click **Deploy**.
-5. Click **Authorize access**, choose your account, then **Advanced > Go to (project name) > Allow**.
-6. Copy the **Web app URL** (ends in `/exec`) into `settings.json` as `webhook_url`.
-7. Check it: open the URL in a browser. You should see "Smash Watcher script is live." Then press **Test Google Sheets connection** on the Stats tab. A `Smash Matches` tab with headers appears.
+## Your files (`local` folder)
 
-Common problems:
-- Browser shows a sign-in page: access isn't set to **Anyone**. Redeploy with it set.
-- URL ends in `/dev`: use the `/exec` URL from **Deploy > Manage deployments**.
-- You edited the script after deploying: **Deploy > Manage deployments > pencil > Version: New version > Deploy**.
-- Open the editor from the sheet itself (Extensions > Apps Script), not as a separate project.
-
-## Sheet columns (tab `Smash Matches`)
-
-`detected_at` (same for every player in a match), `player_no`, `name`, `placement`, `survival_time_s`, then all 25 stats with units in the headers.
-
-## If something goes wrong
-
-Errors go to `error.log`. App settings save automatically to `settings.json`. If a stat reads wrong, press **Save sample** on the stats screen and send me the `.png` and `.txt`.
+| File | What it is |
+|---|---|
+| `settings.json` | Your settings, including the Google link |
+| `results_matches.csv` | Every match you sent or saved |
+| `samples\` | Pictures and text from Save sample |
+| `error.log` | Details if the app crashes |

@@ -1,0 +1,12 @@
+# The user's own data: settings (incl. their Google link), results, samples, logs, update backups.
+local/
+
+# Built or packaged files
+SmashWatcher.exe
+dist/
+
+# Old pre-v5 file locations, in case someone runs an old copy in this folder
+/settings.json
+/results_matches.csv
+/error.log
+/samples/
