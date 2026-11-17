@@ -3,7 +3,7 @@
 $SheetTab = 'Smash Matches'
 
 function Get-SheetHeader($statList) {
-    $h = @('detected_at', 'player_no', 'player', 'character', 'placement', 'survival_time_s')
+    $h = @('detected_at', 'match_no', 'player_no', 'player', 'character', 'placement', 'survival_time_s')
     foreach ($s in $statList) { $h += (Get-StatDisplayName $s) }
     $h += 'needs_check'
     return $h
@@ -12,17 +12,28 @@ function Get-SheetHeader($statList) {
 # One row per player. $cell is a scriptblock (rowKey, column) -> text, so the review grid's edits are used.
 # $needsCheck (optional) is a scriptblock (column) -> text listing values that were flagged and never confirmed.
 # Every stat keeps its own column; stats that weren't ticked stay blank so columns never shift.
-function Get-SheetRows([string]$stamp, [int]$players, $statList, [scriptblock]$cell, [scriptblock]$needsCheck = $null) {
+function Get-SheetRows([string]$stamp, [int]$players, $statList, [scriptblock]$cell, [scriptblock]$needsCheck = $null, [string]$matchNo = '') {
     $out = @()
     for ($c = 0; $c -lt $players; $c++) {
         $num = & $cell 'num' $c
         if (-not $num) { $num = [string]($c + 1) }
-        $row = @($stamp, $num, (& $cell 'player' $c), (& $cell 'character' $c), (& $cell 'place' $c), (& $cell 'surv' $c))
+        $row = @($stamp, $matchNo, $num, (& $cell 'player' $c), (& $cell 'character' $c), (& $cell 'place' $c), (& $cell 'surv' $c))
         foreach ($s in $statList) { $row += (& $cell ('stat:' + $s.Name) $c) }
         if ($needsCheck -ne $null) { $row += (& $needsCheck $c) } else { $row += '' }
-        if (@($row[2..($row.Count - 1)] | Where-Object { $_ }).Count -gt 0) { $out += , @($row) }
+        if (@($row[3..($row.Count - 1)] | Where-Object { $_ }).Count -gt 0) { $out += , @($row) }
     }
     return $out
+}
+
+# Writes one match to its own file in local\matches (match_<no>_<time>.csv), alongside the running results file.
+function Save-MatchCsv([string]$matchNo, [string]$stamp, $header, $rows) {
+    $name = 'match'
+    if ($matchNo) { $name += '_' + ($matchNo -replace '[^\w\-]', '') }
+    $name += '_' + ([datetime]::Parse($stamp).ToString('yyyyMMdd_HHmmss')) + '.csv'
+    $path = Join-Path $MatchesDir $name
+    $lines = @((ConvertTo-CsvLine $header)) + @($rows | ForEach-Object { ConvertTo-CsvLine $_ })
+    [System.IO.File]::WriteAllText($path, (($lines -join "`r`n") + "`r`n"), (New-Object System.Text.UTF8Encoding $true))
+    return $path
 }
 
 function ConvertTo-CsvLine($values) { return (($values | ForEach-Object { '"' + ([string]$_ -replace '"', '""') + '"' }) -join ',') }

@@ -278,7 +278,7 @@ function Invoke-TestNow {
         Log ('Test: read {0} line(s) of text in {1:N1}s.' -f @($read.Ocr).Count, $sw.Elapsed.TotalSeconds)
         $hits = @(Get-TriggerHits $read.Ocr (Get-StatNames) (Get-ExtraKeywords) ([bool]$UI.UseLabels.Checked))
         Log ('Trigger names seen: {0} (need {1}) [{2}]' -f $hits.Count, $UI.Need.Value, ($hits -join ', '))
-        $m = Read-StatsFrame $read.Ocr (Get-StatNames) $read.Width $read.Frame
+        $m = Read-StatsFrame $read.Ocr (Get-StatNames) $read.Width $read.Frame (New-DigitStore)
         if ($m -eq $null) { Log 'No stats panels found on this frame.' }
         else {
             Log ('Found {0} player panel(s): {1} value(s) read, {2} hard to read (marked ?), {3} assumed 0.' -f $m.N, $m.Cells.Count, $m.Rechecks.Count, $m.Guesses.Count)

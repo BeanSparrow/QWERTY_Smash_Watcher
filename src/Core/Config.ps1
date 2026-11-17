@@ -11,6 +11,7 @@ $Cfg = @{
     read_duration_s       = 20
     enhance               = $true
     stats_checked         = $null
+    last_match_no         = 0      # the review window suggests the next number
 }
 
 function Import-Settings {
@@ -41,6 +42,13 @@ function Get-StatList {
         $list += [pscustomobject]@{ Name = $name; Unit = $unit }
     }
     return $list
+}
+
+# Fighter names as the results screen shows them (config\characters.txt), used to clean up OCR'd names.
+function Get-CharacterList {
+    $path = Join-Path $ConfigDir 'characters.txt'
+    if (-not (Test-Path $path)) { return @() }
+    return @(Get-Content $path -Encoding UTF8 | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith('#') })
 }
 
 function Get-StatDisplayName($stat) {

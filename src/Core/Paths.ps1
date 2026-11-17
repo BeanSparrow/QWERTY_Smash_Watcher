@@ -4,6 +4,7 @@ $ConfigDir    = Join-Path $AppRoot 'config'
 $GoogleDir    = Join-Path $AppRoot 'google'
 $LocalDir     = Join-Path $AppRoot 'local'
 $SampleDir    = Join-Path $LocalDir 'samples'
+$MatchesDir   = Join-Path $LocalDir 'matches'      # one CSV per kept match
 $BackupDir    = Join-Path $LocalDir 'backup'
 $StatsFile    = Join-Path $ConfigDir 'stats.txt'
 $AppsScript   = Join-Path $GoogleDir 'apps_script.gs'
@@ -16,7 +17,7 @@ $GitHubRepo   = 'BeanSparrow/QWERTY_Smash_Watcher'
 $AppVersion = '0.0.0'
 if (Test-Path $VersionFile) { $AppVersion = (Get-Content $VersionFile -Raw).Trim() }
 
-foreach ($dir in @($LocalDir, $SampleDir)) {
+foreach ($dir in @($LocalDir, $SampleDir, $MatchesDir)) {
     if (-not (Test-Path $dir)) { [void](New-Item -ItemType Directory -Path $dir) }
 }
 

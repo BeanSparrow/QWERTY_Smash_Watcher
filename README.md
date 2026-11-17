@@ -20,7 +20,7 @@ It needs nothing but Windows 10 or 11: no Python, no installs.
 
 1. Press **Start**. The app checks the video once a second.
 2. When stat names (KOs, Falls, Damage Given...) show up, it records for 20 seconds. Scroll through the stats screen during that time so it sees every row.
-3. A **review window** opens with a column per player. Fix anything that's wrong, then send it. **Pink** rows weren't read at all. **Yellow** cells were hard to read, or were assumed to be 0 because the value was on screen but unreadable (the game's lone "0" is hard for Windows to read), so check those. Your options:
+3. A **review window** opens with a column per player. Check the **Match #** (it suggests the next number), fix anything that's wrong, then keep it. **Pink** rows weren't read at all; **yellow** cells were hard to read, so check those. Leave the stats screen up for the whole 20 seconds and scroll through it, starting from the first page (Out at / KOs / Falls / SDs), which gives placement and survival time. Your options:
    - **Send to Google Sheets**
    - **Copy** (paste into the sheet yourself)
    - **Save to CSV file only**
@@ -38,8 +38,10 @@ It needs nothing but Windows 10 or 11: no Python, no installs.
 
 - Each player panel is a column, left to right.
 - **Character** is the big name at the top of each panel.
-- **Survival time** is the seconds until that player was knocked out. A player who was never knocked out gets the longest time anyone lasted, which is the match length.
-- **Placement** is read from the screen when possible. Otherwise it's worked out from survival time, with never knocked out counting as 1st.
+- **Survival time** comes from the first page's "Out at" time. A player showing `---` was never knocked out and gets the longest time anyone lasted, which is the match length.
+- **Placement** is worked out from those times (never knocked out = 1st).
+- **KOs, Falls and SDs** come from the first page. Falls and SDs are shown negative in the game and stored as positive counts.
+- Short numbers that Windows can't read are read by the shape of their digits, learned from the numbers it can read.
 - Values are stored as plain numbers. The units are in the column headers.
 - The last column, `needs_check`, lists any yellow values you sent without changing, so unconfirmed numbers are easy to find in the sheet later.
 
@@ -66,7 +68,8 @@ If it fails, the log says what Google answered. Common fixes:
 | File | What it is |
 |---|---|
 | `settings.json` | Your settings, including the Google link |
-| `results_matches.csv` | Every match you sent or saved |
+| `results_matches.csv` | Every match you kept (sent, copied or saved), one row per player |
+| `matches\match_<#>_<date_time>.csv` | Each kept match in its own file, saved automatically |
 | `samples\` | Pictures and text from Save sample |
 | `samples\match_<date_time>\` | Saved automatically for every recording: up to 10 frames (`.png` plus the text read, `.txt`), `review.txt` (what the review window showed, `?` = yellow), `final.csv` (what you sent, after your edits) and `decision.txt`. The newest 25 matches are kept. **To report a bad read, zip the match's folder and send it.** |
 | `error.log` | Details if the app crashes |

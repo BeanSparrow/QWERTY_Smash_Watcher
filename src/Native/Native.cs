@@ -10,6 +10,13 @@ using System.Text;
 
 namespace SmashWatcher
 {
+    public class Glyph
+    {
+        public int X, Y, W, H, Pixels;
+        public double[] F;
+        public double Aspect { get { return (double)W / H; } }
+    }
+
     public class WindowInfo
     {
         public IntPtr Handle;
@@ -169,6 +176,114 @@ namespace SmashWatcher
             Marshal.Copy(buf, 0, d.Scan0, buf.Length);
             dst.UnlockBits(d);
             return dst;
+        }
+
+        // ---------------------------------------------------------------- digit shapes
+        // Windows OCR ignores short isolated numbers ("8", "11", "0"), so lone values are read by shape instead:
+        // find the white glyphs in an area, describe each as a coarse grid, and compare with examples of each digit.
+
+        public const int GridW = 8, GridH = 12;
+
+        // White-ish connected shapes inside rect (8-connected), in frame coordinates. Values are drawn in white
+        // over coloured or dark panels, so "bright and unsaturated" separates them well.
+        public static List<Glyph> FindGlyphs(Bitmap bmp, Rectangle rect, int minLum, int maxSpread)
+        {
+            List<Glyph> result = new List<Glyph>();
+            rect = Rectangle.Intersect(rect, new Rectangle(0, 0, bmp.Width, bmp.Height));
+            if (rect.Width < 3 || rect.Height < 3) return result;
+            int W = rect.Width, H = rect.Height;
+            BitmapData d = bmp.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            int stride = Math.Abs(d.Stride);
+            byte[] buf = new byte[stride * H];
+            Marshal.Copy(d.Scan0, buf, 0, buf.Length);
+            bmp.UnlockBits(d);
+            bool[] on = new bool[W * H];
+            for (int y = 0; y < H; y++)
+                for (int x = 0; x < W; x++)
+                {
+                    int i = y * stride + x * 4;
+                    int b = buf[i], g = buf[i + 1], r = buf[i + 2];
+                    int lum = (r * 77 + g * 150 + b * 29) >> 8;
+                    int mx = Math.Max(r, Math.Max(g, b)), mn = Math.Min(r, Math.Min(g, b));
+                    on[y * W + x] = lum >= minLum && mx - mn <= maxSpread;
+                }
+            int[] label = new int[W * H];
+            int next = 0;
+            int[] stack = new int[W * H];
+            for (int start = 0; start < W * H; start++)
+            {
+                if (!on[start] || label[start] != 0) continue;
+                next++;
+                int sp = 0; stack[sp++] = start; label[start] = next;
+                int x0 = W, y0 = H, x1 = -1, y1 = -1, count = 0;
+                List<int> pixels = new List<int>();
+                while (sp > 0)
+                {
+                    int p = stack[--sp]; pixels.Add(p); count++;
+                    int px = p % W, py = p / W;
+                    if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py;
+                    for (int dy = -1; dy <= 1; dy++)
+                        for (int dx = -1; dx <= 1; dx++)
+                        {
+                            int nx = px + dx, ny = py + dy;
+                            if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+                            int q = ny * W + nx;
+                            if (on[q] && label[q] == 0) { label[q] = next; stack[sp++] = q; }
+                        }
+                }
+                int gw = x1 - x0 + 1, gh = y1 - y0 + 1;
+                if (gh < 4 || count < 6) continue;
+                Glyph gl = new Glyph();
+                gl.X = rect.X + x0; gl.Y = rect.Y + y0; gl.W = gw; gl.H = gh; gl.Pixels = count;
+                double[] f = new double[GridW * GridH];
+                int[] cellCount = new int[GridW * GridH];
+                foreach (int p in pixels)
+                {
+                    int cx = Math.Min(GridW - 1, ((p % W) - x0) * GridW / gw);
+                    int cy = Math.Min(GridH - 1, ((p / W) - y0) * GridH / gh);
+                    f[cy * GridW + cx] += 1.0;
+                }
+                double cellArea = Math.Max(1.0, (double)gw * gh / (GridW * GridH));
+                for (int k = 0; k < f.Length; k++) f[k] = Math.Min(1.0, f[k] / cellArea);
+                gl.F = f;
+                result.Add(gl);
+            }
+            result.Sort(delegate (Glyph a, Glyph b2) { return a.X.CompareTo(b2.X); });
+            return result;
+        }
+
+        // White text becomes black on a white background (everything else white). Windows OCR reads big bold
+        // numbers like "1:45" much more reliably in this form.
+        public static Bitmap WhiteTextToBlack(Bitmap src, int minLum, int maxSpread)
+        {
+            Bitmap dst = new Bitmap(src.Width, src.Height, PixelFormat.Format32bppArgb);
+            Rectangle rc = new Rectangle(0, 0, src.Width, src.Height);
+            BitmapData s = src.LockBits(rc, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            BitmapData d = dst.LockBits(rc, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+            int n = Math.Abs(s.Stride) * src.Height;
+            byte[] a = new byte[n];
+            Marshal.Copy(s.Scan0, a, 0, n);
+            for (int i = 0; i < n; i += 4)
+            {
+                int b = a[i], g = a[i + 1], r = a[i + 2];
+                int lum = (r * 77 + g * 150 + b * 29) >> 8;
+                int mx = Math.Max(r, Math.Max(g, b)), mn = Math.Min(r, Math.Min(g, b));
+                byte v = (lum >= minLum && mx - mn <= maxSpread) ? (byte)0 : (byte)255;
+                a[i] = v; a[i + 1] = v; a[i + 2] = v; a[i + 3] = 255;
+            }
+            Marshal.Copy(a, 0, d.Scan0, n);
+            src.UnlockBits(s); dst.UnlockBits(d);
+            return dst;
+        }
+
+        // How different two glyphs look (0 = identical). Shape grid plus width/height ratio, which separates "1".
+        public static double GlyphDistance(Glyph a, double[] fb, double aspectB)
+        {
+            double s = 0;
+            for (int k = 0; k < a.F.Length; k++) { double t = a.F[k] - fb[k]; s += t * t; }
+            s /= a.F.Length;
+            double asp = (double)a.W / a.H - aspectB;
+            return s + 0.5 * asp * asp;
         }
 
         // Edit distance, used to match stat labels the OCR slightly misread.

@@ -11,6 +11,6 @@ if (-not ('SmashWatcher.Native' -as [type])) {
 }
 [SmashWatcher.Native]::MakeDpiAware()
 
-foreach ($module in @('Paths', 'Log', 'Config', 'Ocr', 'Capture', 'StatsReader', 'Recorder', 'Output', 'Updater')) {
+foreach ($module in @('Paths', 'Log', 'Config', 'Ocr', 'Capture', 'Digits', 'StatsReader', 'Recorder', 'Output', 'Updater')) {
     . (Join-Path $SrcDir "Core\$module.ps1")
 }

@@ -14,7 +14,8 @@ src\
     Config.ps1              $Cfg settings (local\settings.json) and the stat list (config\stats.txt).
     Ocr.ps1                 Windows OCR wrapper; Get-OcrImage enlarges + contrast-stretches frames.
     Capture.ps1             Sources: app window (PrintWindow), screen region, whole screen.
-    StatsReader.ps1         Trigger detection and per-frame parsing of the stats panels.
+    Digits.ps1              Reads short numbers by digit shape; learns shapes from values the OCR reads.
+    StatsReader.ps1         Trigger detection, per-frame parsing of the stats panels, and the first page.
     Recorder.ps1            Combines frames by voting; builds the review table (survival, placement).
     Output.ps1              Sheet rows, CSV, and the POST to the Apps Script web app.
     Updater.ps1             GitHub Releases check, download, install, restart.
@@ -23,6 +24,8 @@ src\
     ReviewWindow.ps1        Post-match approval grid.
     RegionPicker.ps1        Snipping-Tool-style "Set region".
 config\stats.txt            Stat labels in on-screen order ("Label" or "Label|unit").
+config\characters.txt       Fighter names as the results screen shows them.
+config\digits.txt           Digit-shape starter set (built by tools\learn_digits.ps1).
 google\apps_script.gs       Receiver pasted into the Google Sheet.
 launcher\                   SmashWatcher.exe source, make_exe.bat, and "Start Smash Watcher.bat" (console start, for errors).
 tools\                      Developer scripts (not shipped).
@@ -51,13 +54,40 @@ Real captures from Ken live in `local\samples\ken\` (not in git). Screenshots pa
 powershell -ExecutionPolicy Bypass -File tools/convert_image.ps1 -In shot.webp -Out local/samples/ken/shot.png
 ```
 
+### Scoring against real matches
+
+Each `local\samples\match_*` folder can hold a `truth.json`: the true values, typed by hand from that match's frames. Then this replays the saved frames through the reader and grades every cell:
+
+```bash
+powershell -ExecutionPolicy Bypass -File tools/score_match.ps1 -Detail
+```
+
+The grades are `right`, `flagged-right` (yellow but correct), `WRONG` (wrong and not yellow, the one that must stay at 0), `flagged-wrong` and `missed`. Run it before every release. Use `-Starter <file>` to score with a digit starter set built *without* that match, for an honest number.
+
+| Release | right | yellow-right | WRONG | yellow-wrong | missed |
+|---|---|---|---|---|---|
+| 5.0.4 | 90 | 10 | 2 | 6 | 30 |
+| 5.0.5 (cross-tested) | 127 | 9 | 0 | 0 | 2 |
+
+### Digit shapes
+
+`config\digits.txt` is the starter set of digit shapes (`src\Core\Digits.ps1`, `Native.FindGlyphs`). Rebuild it after adding real matches:
+
+```bash
+powershell -ExecutionPolicy Bypass -File tools/learn_digits.ps1
+```
+
+On 168 known values, shape reading was 167 right and 0 wrong (with 1 not read). Very clear matches count as read; likely ones are shown yellow.
+
 ### What the real stats screen looks like (from Ken's samples)
 
 - One panel per player, edge to edge with 4 players and with a gap with 2. Labels sit on dark bars, and each **value is on the line below its label**, right-aligned.
 - KOs and Falls are stock icons on this screen, not numbers.
 - Above the list: the character name (large, may wrap to two lines), "P1" plus the player tag ("Player 4"), and a big placement digit, which the OCR doesn't read.
 - Each panel ends in an "(A) OK" button. Replays add "Next Replay", a countdown and "(B) Quit" down the middle.
-- The game's lone `0` rarely reads. The reader takes a second look at visible but empty value lines (enlarged crop), then assumes 0. Both results are shown yellow in the review.
+- Windows OCR skips short lone numbers. For a visible but empty value line the reader tries digit shapes, then OCR on an enlarged crop. It never guesses.
+- **First page** (real end screens, not replays): "Out at" (`---` or `m:ss`), KOs, Falls and SDs as large numbers on the label's row. Only the left panel has labels, and Falls/SDs are negative. The recorder keeps these frames and reads them at the end, using panel positions from the list pages (`Read-SummaryPage`). The time digits are bolder, so shape-read times are yellow.
+- Character names snap to `config\characters.txt`.
 
 ## Releasing an update to Ken
 

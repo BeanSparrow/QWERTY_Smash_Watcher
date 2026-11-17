@@ -84,6 +84,27 @@ function Read-OcrArea($frame, [System.Drawing.Rectangle]$rect) {
     return ((@($ws | Sort-Object X | ForEach-Object { $_.T })) -join '')
 }
 
+# Reads big white text (the first page's "1:45") as black-on-white, repeated three times side by side: Windows OCR
+# skips a lone short string but reads it reliably as part of a line. Returns the first copy's text, or ''.
+function Read-OcrAreaBold($frame, [System.Drawing.Rectangle]$rect) {
+    $rect = [System.Drawing.Rectangle]::Intersect($rect, (New-Object System.Drawing.Rectangle 0, 0, $frame.Width, $frame.Height))
+    if ($rect.Width -lt 8 -or $rect.Height -lt 8) { return '' }
+    $crop = $frame.Clone($rect, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $bw = [SmashWatcher.Native]::WhiteTextToBlack($crop, 190, 60); $crop.Dispose()
+    # Text about 120 px tall reads best; bigger is not better here.
+    $scale = [Math]::Max(0.3, [Math]::Min(3.0, 120.0 / $rect.Height))
+    $w = [int]($rect.Width * $scale); $h = [int]($rect.Height * $scale); $pad = 50; $space = 30
+    $canvas = New-Object System.Drawing.Bitmap (3 * $w + 2 * $space + 2 * $pad), ($h + 2 * $pad)
+    $g = [System.Drawing.Graphics]::FromImage($canvas)
+    try {
+        $g.Clear([System.Drawing.Color]::White)
+        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        for ($k = 0; $k -lt 3; $k++) { $g.DrawImage($bw, (New-Object System.Drawing.Rectangle ($pad + $k * ($w + $space)), $pad, $w, $h)) }
+    } finally { $g.Dispose(); $bw.Dispose() }
+    try { $lines = @(Read-Ocr $canvas) } finally { $canvas.Dispose() }
+    return ((@($lines | ForEach-Object { $_.Text })) -join ' ')
+}
+
 function Format-OcrDump($lines) {
     $sb = New-Object System.Text.StringBuilder
     foreach ($l in $lines) {

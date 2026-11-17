@@ -31,6 +31,8 @@ function New-Recording([string[]]$allLabels, [string[]]$wanted, [string]$sampleR
         Thumb      = $null
         ThumbScore = -1
         SampleDir  = $dir
+        Digits     = (New-DigitStore)   # digit shapes; grows as the OCR reads values in this match
+        Summaries  = (New-Object System.Collections.ArrayList)   # first-page frames, read at the end
         Saved      = 0
         SinceSave  = 0
         SeenViews  = @{}
@@ -43,8 +45,17 @@ function Remove-OldMatchFolders([string]$sampleRoot) {
 }
 
 function Add-RecordingFrame($rec, $ocr, $frame, [double]$ocrWidth) {
-    $m = Read-StatsFrame $ocr $rec.AllLabels $ocrWidth $frame
+    $m = Read-StatsFrame $ocr $rec.AllLabels $ocrWidth $frame $rec.Digits
     if ($m -eq $null) { return 0 }
+    if ($m.PSObject.Properties['Summary'] -and $m.Summary) {
+        # Keep a few first-page frames (a copy, since the caller disposes the frame) to read at the end.
+        if ($rec.Summaries.Count -lt 3) {
+            $copy = $frame.Clone((New-Object System.Drawing.Rectangle 0, 0, $frame.Width, $frame.Height), [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+            [void]$rec.Summaries.Add([pscustomobject]@{ Ocr = $ocr; Width = $ocrWidth; Frame = $copy })
+        }
+        Save-RecordingFrame $rec $m $ocr $frame
+        return 0
+    }
     [void]$rec.Frames.Add($m)
     if ($m.Cells.Count -gt $rec.ThumbScore) {
         $rec.ThumbScore = $m.Cells.Count
@@ -113,10 +124,26 @@ function Build-MatchTable($rec, $statList) {
     foreach ($f in $rec.Frames) { $nVotes[$f.N] = [int]$nVotes[$f.N] + $f.Cells.Count + 1 }
     $n = [int](Get-TopVote $nVotes)
 
+    # First page: read it now that the list pages have shown where each panel is (median position per panel).
+    $frames = @($rec.Frames)
+    $geoFrames = @($rec.Frames | Where-Object { $_.N -eq $n -and $_.PSObject.Properties['Geometry'] })
+    if ($rec.Summaries.Count -gt 0 -and $geoFrames.Count -gt 0) {
+        $geo = [pscustomobject]@{
+            Lefts  = @(0..($n - 1) | ForEach-Object { $i = $_; Get-Median ($geoFrames | ForEach-Object { $_.Geometry.Lefts[$i] }) })
+            Rights = @(0..($n - 1) | ForEach-Object { $i = $_; Get-Median ($geoFrames | ForEach-Object { $_.Geometry.Rights[$i] }) })
+        }
+        foreach ($s in $rec.Summaries) {
+            $r = Read-SummaryPage $s.Ocr $s.Width $s.Frame $rec.Digits $geo
+            if ($r -ne $null) { $frames += [pscustomobject]@{ N = $n; Cells = $r.Cells; Rechecks = $r.Rechecks; Guesses = @{}; Head = $r.Head } }
+        }
+    }
+    foreach ($s in $rec.Summaries) { $s.Frame.Dispose() }
+    $rec.Summaries.Clear()
+
     # Three tiers, each voted on separately: full-frame readings, second-look readings (enlarged crop), and guessed
     # zeros (value line visible but unreadable). A lower tier is only used when no frame produced a higher one.
     $votes = @{}; $recheckVotes = @{}; $guessVotes = @{}
-    foreach ($f in $rec.Frames) {
+    foreach ($f in $frames) {
         if ($f.N -ne $n) { continue }
         foreach ($pair in @(@($f.Cells, $votes), @($f.Head, $votes), @($f.Rechecks, $recheckVotes), @($f.Guesses, $guessVotes))) {
             $src = $pair[0]; $tally = $pair[1]
@@ -144,18 +171,26 @@ function Build-MatchTable($rec, $statList) {
         if ($s -ne $null -and ($maxOut -eq $null -or $s -gt $maxOut)) { $maxOut = $s }
     }
 
-    # A player with "---", or no time at all while others have one, was never knocked out.
-    $surv = @(); $neverOut = @()
+    # A player showing "---" was never knocked out. (If no "---" was read at all, a player with no time while
+    # others have one is assumed to be the survivor, as before.)
+    $dashSeen = @(0..($n - 1) | Where-Object { (& $get "$_|out") -eq '---' }).Count -gt 0
+    # Times that were only "likely" reads (yellow) make survival and placement worth checking too.
+    $unsureOut = @(0..($n - 1) | ForEach-Object { (-not $votes.ContainsKey("$_|out")) -and $recheckVotes.ContainsKey("$_|out") })
+    $anyUnsure = @($unsureOut | Where-Object { $_ }).Count -gt 0
+    $surv = @(); $neverOut = @(); $survFlag = @()
     for ($c = 0; $c -lt $n; $c++) {
-        $never = ($secs[$c] -eq $null) -and $maxOut -ne $null
+        if ($dashSeen) { $never = ((& $get "$c|out") -eq '---') -and $maxOut -ne $null }
+        else { $never = ($secs[$c] -eq $null) -and $maxOut -ne $null }
         $neverOut += $never
         if ($secs[$c] -ne $null) { $surv += [string]$secs[$c] } elseif ($never) { $surv += [string]$maxOut } else { $surv += '' }
+        $survFlag += ([bool]$unsureOut[$c] -or ($never -and $anyUnsure))
     }
     # Placement: read from the screen if possible, otherwise ranked by survival (never knocked out = 1st).
-    $places = @()
+    $places = @(); $placeFlag = @()
     for ($c = 0; $c -lt $n; $c++) {
         $p = & $get "$c|place"
-        if (-not $p -and $maxOut -ne $null) {
+        $placeFlag += ((-not $p) -and $anyUnsure)
+        if (-not $p -and ($secs[$c] -ne $null -or $neverOut[$c]) -and $maxOut -ne $null) {
             $better = 0
             for ($o = 0; $o -lt $n; $o++) {
                 if ($o -eq $c) { continue }
@@ -169,15 +204,15 @@ function Build-MatchTable($rec, $statList) {
 
     $rows = @()
     foreach ($fr in $FixedRows) {
-        $vals = @()
+        $vals = @(); $flags = @()
         for ($c = 0; $c -lt $n; $c++) {
             switch ($fr.Key) {
-                'surv'  { $vals += $surv[$c] }
-                'place' { $vals += $places[$c] }
-                default { $vals += (& $get ("$c|" + $fr.Key)) }
+                'surv'  { $vals += $surv[$c]; $flags += ([bool]$surv[$c] -and $survFlag[$c]) }
+                'place' { $vals += $places[$c]; $flags += ([bool]$places[$c] -and $placeFlag[$c]) }
+                default { $vals += (& $get ("$c|" + $fr.Key)); $flags += $false }
             }
         }
-        $rows += [pscustomobject]@{ Key = $fr.Key; Label = $fr.Label; Values = $vals }
+        $rows += [pscustomobject]@{ Key = $fr.Key; Label = $fr.Label; Values = $vals; Guessed = $flags }
     }
     $found = 0
     foreach ($stat in $statList) {

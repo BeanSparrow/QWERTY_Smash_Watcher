@@ -6,7 +6,7 @@ function Show-ReviewWindow($match, $statList) {
     $script:RV = @{ Match = $match; Stats = $statList; Done = $false; RowOf = @{}; Guesses = 0; Flagged = @() }
 
     $rf = New-Object System.Windows.Forms.Form
-    $rf.Text = 'Review match stats'; $rf.ClientSize = New-Object System.Drawing.Size(700, 560)
+    $rf.Text = 'Review match stats'; $rf.ClientSize = New-Object System.Drawing.Size(700, 566)
     $rf.StartPosition = 'CenterScreen'; $rf.TopMost = $true; $rf.Font = New-Object System.Drawing.Font('Segoe UI', 9.5)
     $rf.FormBorderStyle = 'FixedDialog'; $rf.MaximizeBox = $false; $rf.MinimizeBox = $false
 
@@ -28,14 +28,15 @@ function Show-ReviewWindow($match, $statList) {
             for ($c = 0; $c -lt $n; $c++) {
                 if ($row.Guessed[$c]) {
                     $grid.Rows[$i].Cells[$c + 1].Style.BackColor = [System.Drawing.Color]::LightGoldenrodYellow; $script:RV.Guesses++
-                    $script:RV.Flagged += [pscustomobject]@{ Row = $i; Col = $c; Original = [string]$row.Values[$c]; Name = $row.Key.Substring(5) }
+                    $flagName = $row.Label; if ($row.Key -like 'stat:*') { $flagName = $row.Key.Substring(5) }
+                    $script:RV.Flagged += [pscustomobject]@{ Row = $i; Col = $c; Original = [string]$row.Values[$c]; Name = $flagName }
                 }
             }
         }
         if ($row.Key -like 'stat:*') { $statRows++; if ($blank) { $missing++ } }
     }
     $msg = ('{0} of {1} ticked stats read for {2} player(s), match at {3}. Columns are the player panels, left to right. Click any cell to fix it. Pink rows were not read.' -f ($statRows - $missing), $statRows, $n, $match.Stamp)
-    if ($script:RV.Guesses -gt 0) { $msg += ' Yellow cells were hard to read (or assumed 0): check them. Any you leave unchanged are listed in the needs_check column.' }
+    if ($script:RV.Guesses -gt 0) { $msg += ' Yellow cells were hard to read: check them. Any you leave unchanged are listed in the needs_check column.' }
     $lbl = New-Object System.Windows.Forms.Label
     $lbl.SetBounds(10, 6, 680, 48); $lbl.Text = $msg; $lbl.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
 
@@ -43,14 +44,17 @@ function Show-ReviewWindow($match, $statList) {
     $pb.SetBounds(10, 368, 330, 182); $pb.SizeMode = 'Zoom'; $pb.BackColor = [System.Drawing.Color]::Black
     if ($match.Thumb -ne $null) { $pb.Image = $match.Thumb }
 
+    # Match number: suggested as the next one after the last match kept; editable.
+    $lblNo = New-Object System.Windows.Forms.Label; $lblNo.SetBounds(350, 371, 70, 22); $lblNo.Text = 'Match #'
+    $tbNo = New-Object System.Windows.Forms.TextBox; $tbNo.SetBounds(420, 368, 80, 26); $tbNo.Text = [string]([int]$Cfg.last_match_no + 1)
     $btnSend = New-Object System.Windows.Forms.Button
-    $btnSend.SetBounds(350, 368, 340, 42); $btnSend.Text = 'Send to Google Sheets'
+    $btnSend.SetBounds(350, 400, 340, 42); $btnSend.Text = 'Send to Google Sheets'
     $btnSend.BackColor = [System.Drawing.Color]::SeaGreen; $btnSend.ForeColor = [System.Drawing.Color]::White; $btnSend.FlatStyle = 'Flat'
-    $btnCopy = New-Object System.Windows.Forms.Button; $btnCopy.SetBounds(350, 418, 340, 32); $btnCopy.Text = 'Copy (paste into the sheet yourself)'
-    $btnCsv = New-Object System.Windows.Forms.Button; $btnCsv.SetBounds(350, 456, 340, 32); $btnCsv.Text = 'Save to CSV file only'
-    $btnDrop = New-Object System.Windows.Forms.Button; $btnDrop.SetBounds(350, 494, 340, 32); $btnDrop.Text = 'Discard'
-    $rf.Controls.AddRange(@($lbl, $grid, $pb, $btnSend, $btnCopy, $btnCsv, $btnDrop))
-    $script:RV.Form = $rf; $script:RV.Grid = $grid
+    $btnCopy = New-Object System.Windows.Forms.Button; $btnCopy.SetBounds(350, 448, 340, 32); $btnCopy.Text = 'Copy (paste into the sheet yourself)'
+    $btnCsv = New-Object System.Windows.Forms.Button; $btnCsv.SetBounds(350, 486, 340, 32); $btnCsv.Text = 'Save to CSV file only'
+    $btnDrop = New-Object System.Windows.Forms.Button; $btnDrop.SetBounds(350, 524, 340, 32); $btnDrop.Text = 'Discard'
+    $rf.Controls.AddRange(@($lbl, $grid, $pb, $lblNo, $tbNo, $btnSend, $btnCopy, $btnCsv, $btnDrop))
+    $script:RV.Form = $rf; $script:RV.Grid = $grid; $script:RV.MatchNo = $tbNo
 
     $btnSend.Add_Click({
         $rows = @(Get-ReviewRows)
@@ -58,10 +62,9 @@ function Show-ReviewWindow($match, $statList) {
         $script:RV.Form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
         try {
             Send-Sheet ([string]$Cfg.webhook_url) $SheetTab (Get-SheetHeader $script:RV.Stats) $rows
-            Save-Csv $ResultsCsv (Get-SheetHeader $script:RV.Stats) $rows
-            Save-ReviewOutcome 'Sent to Google Sheets' $rows
+            Save-KeptMatch 'Sent to Google Sheets' $rows
             $script:RV.Done = $true
-            Log ('Sent {0} player row(s) to Google Sheets (also saved to the CSV).' -f $rows.Count)
+            Log ('Sent {0} player row(s) to Google Sheets (also saved as CSV).' -f $rows.Count)
             Set-Status ('Sent {0} player row(s). Press Start to watch again.' -f $rows.Count) 'SeaGreen'
             $script:RV.Form.Close()
         } catch {
@@ -74,17 +77,16 @@ function Show-ReviewWindow($match, $statList) {
         $rows = @(Get-ReviewRows)
         $tsv = (($rows | ForEach-Object { ($_ -join "`t") }) -join "`r`n")
         if ($tsv) {
-            [System.Windows.Forms.Clipboard]::SetText($tsv); Save-ReviewOutcome 'Copied' $rows; $script:RV.Copied = $true
-            Log 'Copied. Click the first empty cell in column A of your sheet and paste (Ctrl+V).'
+            [System.Windows.Forms.Clipboard]::SetText($tsv); Save-KeptMatch 'Copied' $rows; $script:RV.Copied = $true
+            Log 'Copied (also saved as CSV). Click the first empty cell in column A of your sheet and paste (Ctrl+V).'
         }
     })
     $btnCsv.Add_Click({
         $rows = @(Get-ReviewRows)
         if ($rows.Count -eq 0) { return }
-        Save-Csv $ResultsCsv (Get-SheetHeader $script:RV.Stats) $rows
-        Save-ReviewOutcome 'Saved to CSV' $rows
+        Save-KeptMatch 'Saved to CSV' $rows
         $script:RV.Done = $true
-        Log ('Saved to ' + $ResultsCsv + ' (not sent to Google).')
+        Log 'Saved as CSV (not sent to Google).'
         Set-Status 'Saved to CSV. Press Start to watch again.' 'SeaGreen'
         $script:RV.Form.Close()
     })
@@ -118,7 +120,22 @@ function Get-ReviewRows {
             $_.Col -eq $c -and ([string]$v).Trim() -eq $_.Original } | ForEach-Object { $_.Name })
         return ($names -join '; ')
     }
-    Get-SheetRows $script:RV.Match.Stamp $script:RV.Match.N $script:RV.Stats $cell $needsCheck
+    Get-SheetRows $script:RV.Match.Stamp $script:RV.Match.N $script:RV.Stats $cell $needsCheck ($script:RV.MatchNo.Text.Trim())
+}
+
+# Every kept match (sent, copied or saved) is written to its own CSV in local\matches and added once to the running
+# results file. The match number is remembered so the next review suggests the following one.
+function Save-KeptMatch([string]$how, $rows) {
+    $header = Get-SheetHeader $script:RV.Stats
+    $no = $script:RV.MatchNo.Text.Trim()
+    try {
+        $file = Save-MatchCsv $no $script:RV.Match.Stamp $header $rows
+        if (-not $script:RV.AddedToResults) { Save-Csv $ResultsCsv $header $rows; $script:RV.AddedToResults = $true }
+        Log ('Match saved to local\matches\' + (Split-Path $file -Leaf))
+    } catch { Log ('Could not save the match CSV: ' + $_.Exception.Message) }
+    $num = 0
+    if ([int]::TryParse($no, [ref]$num)) { $Cfg.last_match_no = $num; Save-Settings }
+    Save-ReviewOutcome $how $rows
 }
 
 # Records what happened to a match next to its saved frames: the decision, and the final values after any edits.

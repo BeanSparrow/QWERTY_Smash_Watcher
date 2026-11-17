@@ -32,6 +32,25 @@ function ConvertTo-StatNumber([string]$token) {
     return $num
 }
 
+# Snaps an OCR'd character name to the official fighter list ("soNlC" -> "SONIC"). Unknown names are kept as read.
+$script:CharacterKeys = $null
+function Resolve-CharacterName([string]$raw) {
+    if (-not $raw) { return '' }
+    if ($script:CharacterKeys -eq $null) {
+        $script:CharacterKeys = @(Get-CharacterList | ForEach-Object { [pscustomobject]@{ Name = $_; Key = ((Get-FoldText $_) -replace ' ', '') } })
+    }
+    $k = (Get-FoldText $raw) -replace ' ', ''
+    if (-not $k) { return $raw }
+    $best = $null; $bestD = 99
+    foreach ($ch in $script:CharacterKeys) {
+        if ([Math]::Abs($ch.Key.Length - $k.Length) -gt 3) { continue }
+        $d = [SmashWatcher.Native]::Lev($k, $ch.Key)
+        if ($d -lt $bestD) { $bestD = $d; $best = $ch }
+    }
+    if ($best -ne $null -and $bestD -le [Math]::Max(1, [int]($best.Key.Length / 4))) { return $best.Name }
+    return $raw.ToUpper()
+}
+
 function Get-Median($values) {
     $v = @($values | Sort-Object)
     if ($v.Count -eq 0) { return 0.0 }
@@ -110,9 +129,12 @@ function Get-TriggerHits($ocr, [string[]]$labels, [string[]]$extra, [bool]$useLa
 # @{ N = players; Cells = "col|label" -> value; Rechecks = same, from the second look (less sure);
 #    Guesses = "col|label" -> "0"; Head = "col|field" -> text }
 # with header fields character, player, place, num, out.
-function Read-StatsFrame($ocr, [string[]]$labels, [double]$imageWidth, $frame = $null) {
+function Read-StatsFrame($ocr, [string[]]$labels, [double]$imageWidth, $frame = $null, $digitStore = $null) {
     $words = @(); foreach ($l in $ocr) { $words += $l.Words }
     if ($words.Count -eq 0) { return $null }
+    # The first results page ("Out at", KOs, Falls, SDs) has a different layout; the recorder reads it at the end,
+    # once the list pages have shown where each player's panel is.
+    if (Test-SummaryPage $ocr) { return [pscustomobject]@{ Summary = $true; N = 0; Cells = @{}; Rechecks = @{}; Guesses = @{}; Head = @{} } }
     $hits = @(Find-LabelHits $ocr $labels)
     if ($hits.Count -eq 0) { return $null }
     $hMed = Get-Median ($hits | ForEach-Object { $_.H })
@@ -196,9 +218,10 @@ function Read-StatsFrame($ocr, [string[]]$labels, [double]$imageWidth, $frame = 
             if ($piece -ne $null) { $big = [Math]::Max($w.H, $piece.H) }
             if ($piece -ne $null -and [Math]::Abs(($w.Y + $w.H / 2) - $piece.Yc) -lt 0.5 * $big -and ($w.X - $piece.XR) -lt 1.2 * $big) {
                 $piece.T += $w.T; $piece.XR = $w.X + $w.W
+                $piece.YT = [Math]::Min($piece.YT, $w.Y); $piece.YB = [Math]::Max($piece.YB, $w.Y + $w.H)
             } else {
                 if ($piece -ne $null) { $pieces += $piece }
-                $piece = [pscustomobject]@{ T = $w.T; XR = $w.X + $w.W; Yc = $w.Y + $w.H / 2; H = $w.H }
+                $piece = [pscustomobject]@{ T = $w.T; XL = $w.X; XR = $w.X + $w.W; Yc = $w.Y + $w.H / 2; H = $w.H; YT = $w.Y; YB = $w.Y + $w.H }
             }
         }
         if ($piece -ne $null) { $pieces += $piece }
@@ -206,12 +229,19 @@ function Read-StatsFrame($ocr, [string[]]$labels, [double]$imageWidth, $frame = 
         $found = @()
         foreach ($w in $pieces) {
             $v = ConvertTo-StatNumber $w.T
-            if ($v -ne $null) { $found += [pscustomobject]@{ V = $v; XR = $w.XR } }
+            if ($v -ne $null) { $found += [pscustomobject]@{ V = $v; XL = $w.XL; XR = $w.XR; YT = $w.YT; YB = $w.YB } }
         }
         if ($found.Count -gt 0) { [void]$cands.Add([pscustomobject]@{ C = $c; Key = ([string]$c + '|' + $labels[$h.Index]); Found = $found }) }
     }
 
     $script:LastValueCandidates = $cands   # for tools\ debugging
+    $toFrame = 1.0
+    if ($frame -ne $null) { $toFrame = $frame.Width / $imageWidth }
+    $glyphMinH = 0.8 * $hMed * $toFrame   # digits are at least about as tall as the label text
+    $toFrameRect = {
+        param($x0, $y0, $x1, $y1)
+        New-Object System.Drawing.Rectangle ([int]($x0 * $toFrame)), ([int]($y0 * $toFrame)), ([int](($x1 - $x0) * $toFrame)), ([int](($y1 - $y0) * $toFrame))
+    }
 
     # Values are right-aligned, so in each panel they all end at about the same x. A "number" that ends somewhere
     # else (the A button icon read as "0", stray marks) is not a value.
@@ -223,21 +253,25 @@ function Read-StatsFrame($ocr, [string[]]$labels, [double]$imageWidth, $frame = 
             foreach ($f in $cand.Found) {
                 # Allow some slack to the left: units differ in width and a faint unit may not be read at all.
                 if ($edge -ne $null -and ($f.XR -lt $edge - 3 * $hMed -or $f.XR -gt $edge + 1.5 * $hMed)) { continue }
-                if (-not $cells.ContainsKey($cand.Key)) { $cells[$cand.Key] = $f.V }
+                if (-not $cells.ContainsKey($cand.Key)) {
+                    $cells[$cand.Key] = $f.V
+                    # Learn what these digits look like, for values the OCR misses later.
+                    if ($frame -ne $null -and $digitStore -ne $null) {
+                        $pad = 0.3 * $hMed
+                        Add-DigitExamples $digitStore $frame (& $toFrameRect ($f.XL - $pad) ($f.YT - $pad) ($f.XR + $pad) ($f.YB + $pad)) $f.V $glyphMinH
+                    }
+                }
                 break
             }
         }
     }
 
     # 3. Second look. If a label is on screen with the next label below it, its value line is fully visible, so a
-    #    value is definitely there. Read just that line again, enlarged; the full-frame pass skips short values.
-    #    If even that finds nothing it is almost always a lone "0" (the game's ring-shaped zero rarely reads),
-    #    so record a guessed 0. Guesses count far less than real readings when frames are combined, and the
-    #    review window highlights them. KOs and Falls are drawn as stock icons here, so they are never guessed.
-    # Second-look readings are less reliable than the full-frame pass, so they are kept separately (Rechecks).
+    #    value is definitely there; the full-frame OCR skips short ones. Read it by digit shape first, then by
+    #    OCR on the enlarged line. Either way the result is less certain, so it goes in Rechecks (yellow).
+    #    Nothing is guessed: an unreadable value stays blank.
     $guesses = @{}; $rechecks = @{}
     if ($frame -ne $null) {
-        $toFrame = $frame.Width / $imageWidth
         foreach ($h in $hits) {
             $c = & $panelOf $h.X
             if ($c -lt 0) { continue }
@@ -260,10 +294,15 @@ function Read-StatsFrame($ocr, [string[]]$labels, [double]$imageWidth, $frame = 
             # Just the value line: it sits about halfway between this label and the next.
             $y0 = $h.Y + 0.15 * $spacing; $y1 = [Math]::Min($h.Y + 0.8 * $spacing, $next[0].Y - 0.5 * $next[0].H)
             if ($x1 - $x0 -lt 2 * $hMed -or $y1 - $y0 -lt $hMed) { continue }
-            $rect = New-Object System.Drawing.Rectangle ([int]($x0 * $toFrame)), ([int]($y0 * $toFrame)), ([int](($x1 - $x0) * $toFrame)), ([int](($y1 - $y0) * $toFrame))
+            $rect = & $toFrameRect $x0 $y0 $x1 $y1
+            if ($NoGuessLabels -contains $label) { continue }   # stock icons, not numbers
+            $shape = Read-DigitsByShape $digitStore $frame $rect $glyphMinH
+            # Tested on 168 known values from real matches: 167 right, 0 wrong. Very clear matches count as read;
+            # merely likely ones are shown yellow.
+            if ($shape -ne $null -and $shape.Sure -and $shape.WorstD -le 0.03 -and $shape.WorstRatio -le 0.35) { $cells[$key] = $shape.Value; continue }
+            if ($shape -ne $null -and $shape.Sure) { $rechecks[$key] = $shape.Value; continue }
             $v = ConvertTo-StatNumber (Read-OcrArea $frame $rect)
             if ($v -ne $null) { $rechecks[$key] = $v }
-            elseif (-not $clipped -and $NoGuessLabels -notcontains $label) { $guesses[$key] = '0' }
         }
     }
 
@@ -304,8 +343,16 @@ function Read-StatsFrame($ocr, [string[]]$labels, [double]$imageWidth, $frame = 
             elseif ($t -match '^[-–—_.]{2,}$') { if (-not $out) { $out = '---' } }
             elseif ($t -match '^([1-8lI])(st|nd|rd|th)$') { $place = ($Matches[1] -replace '[lI]', '1') }
             elseif ($t -match '^([1-8lI][Pp]|[Pp][1-8lI])$') { $pnum = (($t -replace '[Pp]', '') -replace '[lI]', '1') }
+            elseif ($t -match '^[Pp]([1-8])([A-Za-z].*)$') {
+                # "P3" badge read together with the tag ("P3Kam"): split it, and treat the tag as normal-size text.
+                # (A real digit only: "Player" must not become "P1" + "ayer".)
+                $pnum = $Matches[1]
+                $nameWords += [pscustomobject]@{ T = $Matches[2]; X = $w.X + $w.W / 2; Y = $w.Y; W = $w.W / 2; H = $hMed }
+            }
             elseif ($t -match '^CPU$') { $pnum = 'CPU' }
-            elseif ($t -match '^[1-8]$' -and $w.H -ge 1.6 * $hMed) { $place = $t }
+            # The placement digit is huge (several times the label text); the "P3" badge is merely big.
+            elseif ($t -match '^[1-8]$' -and $w.H -ge 3 * $hMed) { $place = $t }
+            elseif ($t -match '^[1-8]$' -and $w.H -ge 1.3 * $hMed) { }   # a lone badge digit: not a name
             elseif ($t -match '[A-Za-z0-9]' -and $w.H -ge 0.5 * $hMed) { $nameWords += $w }   # digits too: "Player 2"
         }
         $character = ''; $player = ''
@@ -326,7 +373,7 @@ function Read-StatsFrame($ocr, [string[]]$labels, [double]$imageWidth, $frame = 
                 if ($line.Count -gt 0) { $lines += , $line }
                 return (@($lines | ForEach-Object { @($_ | Sort-Object X | ForEach-Object { $_.T }) -join ' ' }) -join ' ')
             }
-            $character = & $inReadingOrder @($nameWords | Where-Object $isBig)
+            $character = Resolve-CharacterName (& $inReadingOrder @($nameWords | Where-Object $isBig))
             $player = & $inReadingOrder @($nameWords | Where-Object { -not (& $isBig) })
             # Default tags are "Player N"; keep exactly that so stray marks don't tag along. Custom names stay as read.
             if ($player -match '(?i)\b(Player\s*[1-8])\b') { $player = $Matches[1] -replace '\s+', ' ' }
@@ -337,5 +384,89 @@ function Read-StatsFrame($ocr, [string[]]$labels, [double]$imageWidth, $frame = 
         $head["$c|num"] = $pnum
         $head["$c|out"] = $out
     }
-    return [pscustomobject]@{ N = $n; Cells = $cells; Rechecks = $rechecks; Guesses = $guesses; Head = $head }
+    # Panel positions as fractions of the width, so the first page (whose panels have no labels) can be read later.
+    $geo = [pscustomobject]@{ Lefts = @($lefts | ForEach-Object { $_ / $imageWidth }); Rights = @($rights | ForEach-Object { $_ / $imageWidth }); LabelH = $hMed / $imageWidth }
+    return [pscustomobject]@{ N = $n; Cells = $cells; Rechecks = $rechecks; Guesses = $guesses; Head = $head; Geometry = $geo }
+}
+
+# ---------------------------------------------------------------- first results page
+# Layout (from real matches): each panel shows "Out at" (the time that player was knocked out, or "---" for the
+# winner) and then KOs, Falls and SDs, as large numbers on the same row as the label. Only the left panel has the
+# labels; the other panels show just the numbers on the same rows. Falls and SDs are shown negative ("-1").
+
+$SummaryRows = @(
+    @{ Key = 'out'; Words = 'outat'; Field = 'head' },
+    @{ Key = 'KOs'; Words = 'kos'; Field = 'stat' },
+    @{ Key = 'Falls'; Words = 'falls'; Field = 'stat' },
+    @{ Key = 'Self-Destructs'; Words = 'sds'; Field = 'stat' }
+)
+
+function Test-SummaryPage($ocr) {
+    foreach ($l in $ocr) { if (((Get-FoldText $l.Text) -replace ' ', '') -eq 'outat') { return $true } }
+    return $false
+}
+
+# Reads the first page with known panel positions ($geo from a list page of the same match).
+# Returns @{ Cells = "col|stat" -> value; Rechecks; Head = "col|out" -> "m:ss" or "---" }.
+function Read-SummaryPage($ocr, [double]$imageWidth, $frame, $digitStore, $geo) {
+    $cells = @{}; $rechecks = @{}; $head = @{}
+    $toFrame = $frame.Width / $imageWidth
+    $words = @(); foreach ($l in $ocr) { $words += $l.Words }
+    # row labels, from the OCR lines
+    $rows = @()
+    foreach ($r in $SummaryRows) {
+        foreach ($l in $ocr) {
+            if (((Get-FoldText $l.Text) -replace ' ', '') -eq $r.Words) {
+                $ws = @($l.Words)
+                $rows += [pscustomobject]@{ Key = $r.Key; Field = $r.Field; Y = ($ws | ForEach-Object { $_.Y + $_.H / 2 } | Measure-Object -Average).Average; H = ($ws | ForEach-Object { $_.H } | Measure-Object -Maximum).Maximum }
+                break
+            }
+        }
+    }
+    if ($rows.Count -lt 2) { return $null }
+    $rows = @($rows | Sort-Object Y)
+    $gaps = @(); for ($i = 1; $i -lt $rows.Count; $i++) { $gaps += ($rows[$i].Y - $rows[$i - 1].Y) }
+    $gap = Get-Median $gaps
+    $labelH = Get-Median ($rows | ForEach-Object { $_.H })
+    $n = $geo.Lefts.Count
+    foreach ($row in $rows) {
+        # The big numbers sit lower in their row than the small label text, so look further below the label than
+        # above it. The time row is taller than the count rows.
+        if ($row.Key -eq 'out') { $y0 = $row.Y - 0.7 * $gap; $y1 = $row.Y + 0.7 * $gap }
+        else { $y0 = $row.Y - 0.3 * $gap; $y1 = $row.Y + 0.7 * $gap }
+        for ($c = 0; $c -lt $n; $c++) {
+            $pl = $geo.Lefts[$c] * $imageWidth; $pr = $geo.Rights[$c] * $imageWidth
+            $x0 = $pl + 0.3 * ($pr - $pl); $x1 = $pr
+            $inBox = @($words | Where-Object { $xc = $_.X + $_.W / 2; $yc = $_.Y + $_.H / 2; $xc -gt $x0 -and $xc -lt $x1 -and $yc -gt $y0 -and $yc -lt $y1 } | Sort-Object X)
+            $text = (@($inBox | ForEach-Object { $_.T }) -join '')
+            $rect = New-Object System.Drawing.Rectangle ([int]($x0 * $toFrame)), ([int]($y0 * $toFrame)), ([int](($x1 - $x0) * $toFrame)), ([int](($y1 - $y0) * $toFrame))
+            if ($row.Key -eq 'out') {
+                if ($text -match '(\d{1,2})[:.](\d{2})') { $head["$c|out"] = '{0}:{1}' -f [int]$Matches[1], $Matches[2]; continue }
+                if ($text -match '^[-–—_]{2,}') { $head["$c|out"] = '---'; continue }
+                # By shape: three flat bars = "---"; otherwise 3-4 digits = m:ss / mm:ss.
+                $flat = @([SmashWatcher.Native]::FindGlyphs($frame, $rect, 170, 75) | Where-Object { $_.W -ge 2 * $_.H -and $_.W -ge $labelH * $toFrame })
+                if ($flat.Count -ge 2) { $head["$c|out"] = '---'; continue }
+                $shapeTime = $null
+                $s = Read-DigitsByShape $digitStore $frame $rect (0.9 * $labelH * $toFrame)
+                if ($s -ne $null -and $s.Glyphs -ge 3) {
+                    $digits = $s.Value.PadLeft($s.Glyphs, '0')
+                    $shapeTime = '{0}:{1}' -f [int]$digits.Substring(0, $digits.Length - 2), $digits.Substring($digits.Length - 2)
+                }
+                # The time digits are bolder than the list digits, so shape matches are usually "likely" rather than
+                # "sure". A sure read counts as read; a likely one is used but shown yellow (Rechecks), and seconds
+                # must be a real clock value.
+                if ($shapeTime -and [int]$shapeTime.Split(':')[1] -lt 60) {
+                    if ($s.Sure) { $head["$c|out"] = $shapeTime } else { $rechecks["$c|out"] = $shapeTime }
+                }
+                continue
+            }
+            $key = "$c|" + $row.Key
+            $v = ConvertTo-StatNumber ($text -replace '^[-–—]', '')
+            if ($v -ne $null) { $cells[$key] = $v; continue }
+            $s = Read-DigitsByShape $digitStore $frame $rect (0.9 * $labelH * $toFrame)
+            if ($s -ne $null -and $s.Sure -and $s.WorstD -le 0.03 -and $s.WorstRatio -le 0.35) { $cells[$key] = $s.Value }
+            elseif ($s -ne $null -and $s.Sure) { $rechecks[$key] = $s.Value }
+        }
+    }
+    return [pscustomobject]@{ Cells = $cells; Rechecks = $rechecks; Head = $head }
 }
