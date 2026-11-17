@@ -9,8 +9,19 @@ $FixedRows = @(
     @{ Key = 'surv';      Label = 'Survival time (s)' }
 )
 
-function New-Recording([string[]]$allLabels, [string[]]$wanted) {
+$MaxSavedFrames = 10      # frames saved per recording
+$KeepMatchFolders = 25    # newest match sample folders kept in local\samples
+
+# $sampleRoot (optional): when given, the recording saves frames and reports to <sampleRoot>\match_<time>\ so every
+# match can be checked afterwards (Ken's direct capture vs. a Discord copy, OCR misses, etc.).
+function New-Recording([string[]]$allLabels, [string[]]$wanted, [string]$sampleRoot = '') {
     $now = Get-Date
+    $dir = ''
+    if ($sampleRoot) {
+        $dir = Join-Path $sampleRoot ('match_' + $now.ToString('yyyyMMdd_HHmmss'))
+        [void](New-Item -ItemType Directory -Path $dir -Force)
+        Remove-OldMatchFolders $sampleRoot
+    }
     return [pscustomobject]@{
         Started    = $now
         Stamp      = $now.ToString('yyyy-MM-dd HH:mm:ss')
@@ -19,7 +30,16 @@ function New-Recording([string[]]$allLabels, [string[]]$wanted) {
         Frames     = (New-Object System.Collections.ArrayList)
         Thumb      = $null
         ThumbScore = -1
+        SampleDir  = $dir
+        Saved      = 0
+        SinceSave  = 0
+        SeenViews  = @{}
     }
+}
+
+function Remove-OldMatchFolders([string]$sampleRoot) {
+    $old = @(Get-ChildItem -Path $sampleRoot -Directory -Filter 'match_*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -Skip $KeepMatchFolders)
+    foreach ($d in $old) { try { Remove-Item $d.FullName -Recurse -Force } catch { } }
 }
 
 function Add-RecordingFrame($rec, $ocr, $frame, [double]$ocrWidth) {
@@ -32,7 +52,45 @@ function Add-RecordingFrame($rec, $ocr, $frame, [double]$ocrWidth) {
         $h = [int](640 * $frame.Height / [Math]::Max(1, $frame.Width))
         $rec.Thumb = New-Object System.Drawing.Bitmap $frame, 640, $h
     }
+    Save-RecordingFrame $rec $m $ocr $frame
     return $m.Cells.Count
+}
+
+# Saves a frame whenever the list shows a new set of stats (a new scroll position), and otherwise every few frames,
+# up to $MaxSavedFrames. Each frame gets a .png and a .txt of everything the OCR read, like Save sample.
+function Save-RecordingFrame($rec, $m, $ocr, $frame) {
+    if (-not $rec.SampleDir -or $rec.Saved -ge $MaxSavedFrames) { return }
+    $rec.SinceSave++
+    $view = (@(@($m.Cells.Keys) + @($m.Rechecks.Keys) + @($m.Guesses.Keys) | ForEach-Object { $_.Substring($_.IndexOf('|') + 1) } | Sort-Object -Unique) -join ',')
+    $isNew = -not $rec.SeenViews.ContainsKey($view)
+    if (-not $isNew -and $rec.SinceSave -lt 4) { return }
+    $rec.SeenViews[$view] = $true
+    $rec.Saved++; $rec.SinceSave = 0
+    $name = 'frame_{0:D2}' -f $rec.Saved
+    try {
+        $frame.Save((Join-Path $rec.SampleDir "$name.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+        Set-Content -Path (Join-Path $rec.SampleDir "$name.txt") -Value (Format-OcrDump $ocr) -Encoding UTF8
+    } catch { Log ('Could not save a sample frame: ' + $_.Exception.Message) }
+}
+
+# Writes what the review window showed (with ? on yellow cells) next to the saved frames.
+function Save-MatchReport($match, [string]$fileName, [string]$text) {
+    if (-not $match.SampleDir) { return }
+    try { Set-Content -Path (Join-Path $match.SampleDir $fileName) -Value $text -Encoding UTF8 } catch { }
+}
+
+function Format-MatchTable($match) {
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.AppendLine(('Match {0}, {1} player(s). "?" = yellow (hard to read or assumed 0).' -f $match.Stamp, $match.N))
+    foreach ($row in $match.Rows) {
+        $cells = for ($i = 0; $i -lt $row.Values.Count; $i++) {
+            $v = [string]$row.Values[$i]
+            if ($row.PSObject.Properties['Guessed'] -and $row.Guessed[$i]) { $v += '?' }
+            '{0,-16}' -f $v
+        }
+        [void]$sb.AppendLine(('{0,-26} {1}' -f $row.Label, ($cells -join '')))
+    }
+    return $sb.ToString()
 }
 
 function Get-TopVote($tally) {
@@ -135,5 +193,5 @@ function Build-MatchTable($rec, $statList) {
         if ($any) { $found++ }
         $rows += [pscustomobject]@{ Key = ('stat:' + $stat.Name); Label = (Get-StatDisplayName $stat); Values = $vals; Guessed = $guessed }
     }
-    return @{ N = $n; Stamp = $rec.Stamp; Rows = $rows; Found = $found; Wanted = $rec.Wanted.Count; Thumb = $rec.Thumb }
+    return @{ N = $n; Stamp = $rec.Stamp; Rows = $rows; Found = $found; Wanted = $rec.Wanted.Count; Thumb = $rec.Thumb; SampleDir = $rec.SampleDir }
 }

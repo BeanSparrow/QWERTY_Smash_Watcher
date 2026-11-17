@@ -41,6 +41,7 @@ It needs nothing but Windows 10 or 11: no Python, no installs.
 - **Survival time** is the seconds until that player was knocked out. A player who was never knocked out gets the longest time anyone lasted, which is the match length.
 - **Placement** is read from the screen when possible. Otherwise it's worked out from survival time, with never knocked out counting as 1st.
 - Values are stored as plain numbers. The units are in the column headers.
+- The last column, `needs_check`, lists any yellow values you sent without changing, so unconfirmed numbers are easy to find in the sheet later.
 
 ## Google Sheets
 
@@ -67,4 +68,5 @@ If it fails, the log says what Google answered. Common fixes:
 | `settings.json` | Your settings, including the Google link |
 | `results_matches.csv` | Every match you sent or saved |
 | `samples\` | Pictures and text from Save sample |
+| `samples\match_<date_time>\` | Saved automatically for every recording: up to 10 frames (`.png` plus the text read, `.txt`), `review.txt` (what the review window showed, `?` = yellow), `final.csv` (what you sent, after your edits) and `decision.txt`. The newest 25 matches are kept. **To report a bad read, zip the match's folder and send it.** |
 | `error.log` | Details if the app crashes |

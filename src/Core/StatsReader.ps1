@@ -274,6 +274,20 @@ function Read-StatsFrame($ocr, [string[]]$labels, [double]$imageWidth, $frame = 
     # In replays the big "Next Replay / Replay" text sits over the middle of the headers; skip that strip.
     $stripHalf = 0.0
     if ($isReplay) { $stripHalf = 0.06 * $imageWidth }
+    # When the list is scrolled, the row just above the top visible label (its value, or part of its label) sits
+    # right under the header. Words that look like a stat value or a stat label word are not player info.
+    $labelWords = @($labels | ForEach-Object { (Get-NormText $_).Split(' ') } | Where-Object { $_.Length -ge 4 } | ForEach-Object { Get-FoldText $_ } | Select-Object -Unique)
+    $looksLikeStat = {
+        param([string]$t)
+        if ($t -match '^(sec\.?|m|km/h|%)$') { return $true }
+        if ($t -notmatch '^[1-8]$' -and (ConvertTo-StatNumber $t) -ne $null) { return $true }
+        $f = (Get-FoldText $t) -replace ' ', ''
+        if ($f.Length -lt 4) { return $false }
+        foreach ($lw in $labelWords) {
+            if ([Math]::Abs($lw.Length - $f.Length) -le 2 -and [SmashWatcher.Native]::Lev($f, $lw) -le [Math]::Max(1, [int]($lw.Length / 5))) { return $true }
+        }
+        return $false
+    }
     for ($c = 0; $c -lt $n; $c++) {
         $x0 = $lefts[$c] - 0.03 * $imageWidth; $x1 = $rights[$c]
         # The header sits a couple of rows above the list. Further up is the capture app's own title bar, so stop there.
@@ -281,7 +295,7 @@ function Read-StatsFrame($ocr, [string[]]$labels, [double]$imageWidth, $frame = 
             $xc = $_.X + $_.W / 2; $yc = $_.Y + $_.H / 2
             $xc -ge $x0 -and $xc -lt $x1 -and $yc -lt $top - 0.2 * $hMed -and $yc -gt $top - 2.6 * $spacing -and
             [Math]::Abs($xc - $imageWidth / 2) -ge $stripHalf -and
-            $HeaderStopWords -notcontains (Get-NormText $_.T) -and $_.T -notmatch '\d+x\d+' })
+            $HeaderStopWords -notcontains (Get-NormText $_.T) -and $_.T -notmatch '\d+x\d+' -and -not (& $looksLikeStat $_.T) })
 
         $out = ''; $place = ''; $pnum = ''; $nameWords = @()
         foreach ($w in $hw) {
@@ -314,6 +328,8 @@ function Read-StatsFrame($ocr, [string[]]$labels, [double]$imageWidth, $frame = 
             }
             $character = & $inReadingOrder @($nameWords | Where-Object $isBig)
             $player = & $inReadingOrder @($nameWords | Where-Object { -not (& $isBig) })
+            # Default tags are "Player N"; keep exactly that so stray marks don't tag along. Custom names stay as read.
+            if ($player -match '(?i)\b(Player\s*[1-8])\b') { $player = $Matches[1] -replace '\s+', ' ' }
         }
         $head["$c|character"] = $character
         $head["$c|player"] = $player

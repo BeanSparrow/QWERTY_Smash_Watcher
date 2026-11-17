@@ -205,7 +205,7 @@ function Start-Watching {
 
 function Start-Recording($read) {
     Log 'Stats screen detected. Recording...'
-    $script:State.Rec = New-Recording (Get-StatNames) (Get-WantedStats)
+    $script:State.Rec = New-Recording (Get-StatNames) (Get-WantedStats) $SampleDir
     $script:State.Mode = 'recording'
     [void](Add-RecordingFrame $script:State.Rec $read.Ocr $read.Frame $read.Width)
 }
@@ -219,10 +219,13 @@ function Complete-Recording([bool]$stoppedEarly) {
     $match = Build-MatchTable $rec $script:StatList
     if ($match.Error) {
         if ($rec.Thumb -ne $null) { $rec.Thumb.Dispose() }
+        if ($rec.SampleDir) { Set-Content -Path (Join-Path $rec.SampleDir 'review.txt') -Value $match.Error -Encoding UTF8 }
         Set-Status 'Done: no stats could be read.' 'DarkOrange'; Log $match.Error; return
     }
+    Save-MatchReport $match 'review.txt' (Format-MatchTable $match)
     Set-Status ('Review: {0} of {1} stats read.' -f $match.Found, $match.Wanted) 'RoyalBlue'
     Log ('Recording finished: {0} player(s). Review the stats, then send or discard.' -f $match.N)
+    if ($rec.SampleDir) { Log ('Saved {0} frame(s) from this match to local\samples\{1}' -f $rec.Saved, (Split-Path $rec.SampleDir -Leaf)) }
     $script:PendingReview = $match
     [void]$UI.Form.BeginInvoke([Action] { Show-ReviewWindow $script:PendingReview $script:StatList })
 }

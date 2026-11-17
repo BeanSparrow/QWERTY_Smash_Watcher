@@ -5,18 +5,21 @@ $SheetTab = 'Smash Matches'
 function Get-SheetHeader($statList) {
     $h = @('detected_at', 'player_no', 'player', 'character', 'placement', 'survival_time_s')
     foreach ($s in $statList) { $h += (Get-StatDisplayName $s) }
+    $h += 'needs_check'
     return $h
 }
 
 # One row per player. $cell is a scriptblock (rowKey, column) -> text, so the review grid's edits are used.
+# $needsCheck (optional) is a scriptblock (column) -> text listing values that were flagged and never confirmed.
 # Every stat keeps its own column; stats that weren't ticked stay blank so columns never shift.
-function Get-SheetRows([string]$stamp, [int]$players, $statList, [scriptblock]$cell) {
+function Get-SheetRows([string]$stamp, [int]$players, $statList, [scriptblock]$cell, [scriptblock]$needsCheck = $null) {
     $out = @()
     for ($c = 0; $c -lt $players; $c++) {
         $num = & $cell 'num' $c
         if (-not $num) { $num = [string]($c + 1) }
         $row = @($stamp, $num, (& $cell 'player' $c), (& $cell 'character' $c), (& $cell 'place' $c), (& $cell 'surv' $c))
         foreach ($s in $statList) { $row += (& $cell ('stat:' + $s.Name) $c) }
+        if ($needsCheck -ne $null) { $row += (& $needsCheck $c) } else { $row += '' }
         if (@($row[2..($row.Count - 1)] | Where-Object { $_ }).Count -gt 0) { $out += , @($row) }
     }
     return $out
@@ -25,6 +28,15 @@ function Get-SheetRows([string]$stamp, [int]$players, $statList, [scriptblock]$c
 function ConvertTo-CsvLine($values) { return (($values | ForEach-Object { '"' + ([string]$_ -replace '"', '""') + '"' }) -join ',') }
 
 function Save-Csv([string]$path, $header, $rows) {
+    # If the file was written with different columns (an older version), set it aside and start a new one.
+    if (Test-Path $path) {
+        $firstLine = Get-Content -Path $path -TotalCount 1 -Encoding UTF8
+        if ($firstLine -ne (ConvertTo-CsvLine $header)) {
+            $old = [System.IO.Path]::ChangeExtension($path, $null).TrimEnd('.') + ('_old_{0}.csv' -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+            Move-Item -Path $path -Destination $old
+            Log ('The results file had different columns, so it was renamed to ' + (Split-Path $old -Leaf) + ' and a new one started.')
+        }
+    }
     $sb = New-Object System.Text.StringBuilder
     if (-not (Test-Path $path)) { [void]$sb.AppendLine((ConvertTo-CsvLine $header)) }
     foreach ($r in $rows) { [void]$sb.AppendLine((ConvertTo-CsvLine $r)) }
